@@ -55,9 +55,9 @@ class PhysicalDeviceOffline(PhysicalDeviceState, DeviceOfflineMixin):
             return state
         return self
     
-class PhysicalDeviceFaulted(PhysicalDeviceState, DeviceFaultedMixin):
+class PhysicalDeviceFaulted(PhysicalDeviceState, DeviceFaultedMixin, DeviceOnlineMixin):
     def transition_to(self, state:DeviceState):
-        if self._check_transition(state, [PhysicalDeviceFaultedOffline, PhysicalDeviceOnline]):
+        if self._check_transition(state, [PhysicalDeviceFaultedOffline]):
             return state
         return self
     

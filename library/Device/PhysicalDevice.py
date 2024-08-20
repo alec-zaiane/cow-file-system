@@ -3,7 +3,7 @@ from .DeviceState import *
 
 class PhysicalDevice(Device):
     """A physical device represents a physical disk that holds data with no redundancy."""
-    def __init__(self, size:int, block_size:int):
+    def __init__(self, name:str, size:int, block_size:int):
         """Create a physical disk with a given size and block size.
 
         Args:
@@ -15,6 +15,8 @@ class PhysicalDevice(Device):
         assert size > 0, "Disk size must be positive."
         assert block_size > 0, "Block size must be positive."
         assert size >= block_size, "Disk size must be at least the block size."
+        
+        super().__init__(name)
                 
         self._state:DeviceState = PhysicalDeviceOffline()
         self._size = size
@@ -60,7 +62,7 @@ class PhysicalDevice(Device):
         Raises:
             ValueError: if the data length is not the same as the block size
             ValueError: if the block number is out of range
-            ValueError: if the device is offline or faulted
+            ValueError: if the device is offline
         Returns:
             bool: True if the write was successful, False otherwise
         """
@@ -70,8 +72,6 @@ class PhysicalDevice(Device):
             raise ValueError(f"Block number {block_number} out of range.")
         if self._state == PhysicalDeviceOffline():
             raise ValueError("Device is offline.")
-        if self._state == PhysicalDeviceFaulted():
-            raise ValueError("Device is faulted.")
         self._data[block_number * self._block_size:(block_number + 1) * self._block_size] = data
         return True
         
@@ -91,3 +91,9 @@ class PhysicalDevice(Device):
             bool: True if the device is now online, False otherwise
         """
         return self.transition_state(PhysicalDeviceOnline())
+    
+    def mark_faulted(self) -> bool:
+        if isinstance(self._state, DeviceOnlineMixin):
+            return self.transition_state(PhysicalDeviceFaulted())
+        else:
+            return self.transition_state(PhysicalDeviceFaultedOffline())

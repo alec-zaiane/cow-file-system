@@ -6,6 +6,12 @@ from abc import ABC, abstractmethod
 from .DeviceState import DeviceState
 
 class Device(ABC):
+    def __init__(self, name:str):
+        self.name = name
+
+    def __str__(self):
+        return self.name
+    
     @abstractmethod
     def read_block(self, block_number:int) -> bytes:
         """Read a block from the device
@@ -68,6 +74,12 @@ class Device(ABC):
             bool: True if the device is now online, False otherwise
         """
         ...
+    @abstractmethod
+    def mark_faulted(self) -> bool:
+        """Mark the device as faulted
+        Returns:
+            bool: True if the device is now faulted, False otherwise
+        """        
         
         
 

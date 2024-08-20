@@ -12,6 +12,9 @@ class StoragePool:
         Raises:
             ValueError: if the devices have different sizes or block sizes
         """
+        
+        if len(set(d.get_block_size() for d in devices)) != 1:
+            raise ValueError("All devices must have the same block size.")
         self._devices = devices
         self._block_size = devices[0].get_block_size()
         self._size = sum(d.get_size() for d in devices)

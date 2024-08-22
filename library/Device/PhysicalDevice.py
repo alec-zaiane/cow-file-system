@@ -50,7 +50,7 @@ class PhysicalDevice(Device):
         if block_number < 0 or block_number >= self._size // self._block_size:
             raise ValueError(f"Block number {block_number} out of range.")
         if self._state == PhysicalDeviceOffline():
-            raise ValueError("Device is offline.")
+            raise ValueError(f"Device {self.name} is offline.")
         return bytes(self._data[block_number * self._block_size:(block_number + 1) * self._block_size])
     
     def write_block(self, block_number:int, data:bytes) -> bool:

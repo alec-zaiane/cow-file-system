@@ -1,5 +1,6 @@
 from typing import Literal, Optional
 from logging import Logger
+import logging
 
 from .Device import Device
 
@@ -16,7 +17,7 @@ class VirtualDevice(Device):
     def __init__(self, name:str, logger:Optional[Logger]):
         super().__init__(name)
         
-        self.logger:Logger = logger if logger is not None else Logger("VirtualDevice")
+        self.logger:Logger = logger if logger is not None else logging.getLogger(__name__)
         self._state:DeviceState = VirtualDeviceOffline()
         self._write_intents:list[tuple[int, bytes]] = [] # writes that have not been committed yet, only populated if a device is unreachable 
         self._devices:list[Device] = []
@@ -145,6 +146,7 @@ class VirtualDeviceStripe(VirtualDevice):
             self._block_number_lookup.append(rolling_sum)
             rolling_sum += d.get_size() // self._block_size
             
+        self.logger.info(f"Created virtual device {self.name} with devices {[str(d) for d in devices]}")
     def _find_device_and_local_block_number(self, block_number:int) -> tuple[Device, int]:
         """Find the device and local block number for a given block number.
 
@@ -240,6 +242,7 @@ class VirtualDeviceMirror(VirtualDevice):
         self._block_size = devices[0].get_block_size()
         self._size = devices[0].get_size()
         self.self_check_state()
+        self.logger.info(f"Created virtual device {self.name} with devices {[str(d) for d in devices]}")
         
     def get_block_size(self) -> int:
         return self._block_size

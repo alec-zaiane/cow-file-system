@@ -13,6 +13,11 @@ testLogger = logging.getLogger("test")
 testLogger.setLevel(logging.ERROR)
 
 
+def pretty_print_usage_stats(pool:StoragePool):
+    active, snapshot, free = pool.get_usage_stats()
+    total = active + snapshot + free
+    print(f"Usage stats: {active} block(s) active ({active/total*100:.2f}%), {snapshot} block(s) in snapshot ({snapshot/total*100:.2f}%), {free} block(s) free ({free/total*100:.2f}%)")
+
 def test1():
     pd = PhysicalDevice("pd1", 100, 10)
     pd2 = PhysicalDevice("pd2", 100, 10)
@@ -57,8 +62,6 @@ def test1():
     print_all_details()
 
 def test2():
-    from library.BlockUser import BlockUser
-    b = BlockUser()
     
     pd1 = PhysicalDevice("pd1",100, 10)
     pd2 = PhysicalDevice("pd2",100, 10)
@@ -73,14 +76,14 @@ def test2():
     
     for i in range(20):
         string_to_write = f"Hellohel{i+1:02d}".encode()
-        sp.write_virtual_block(i, string_to_write, b)
-        print(sp.get_fullness())
+        sp.write_virtual_block(i, string_to_write)
+        pretty_print_usage_stats(sp)
         
-    sp.read_virtual_block(5)
-    sp.release_ownership(5, b)
-    print(sp.get_fullness())
-    sp.write_virtual_block(5, b"Helloworld", b)
-    print(sp.get_fullness())
+    # sp.read_virtual_block(5)
+    # sp.release_ownership(5, b)
+    # print(sp.get_fullness())
+    # sp.write_virtual_block(5, b"Helloworld", b)
+    # print(sp.get_fullness())
     
     
 test2()

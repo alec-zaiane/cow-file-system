@@ -2,7 +2,8 @@ import logging
 from typing import Optional
 
 from library.Device.VirtualDevice import VirtualDevice
-from library.BlockUser import BlockUser
+from library.PhysicalVirtualBlockMapping import PhysicalVirtualBlockMapping
+from library.Snapshot import Snapshot
 
 class StoragePool:
     """A storage pool is a collection of virtual devices that can be used to store data, no redundancy is available at this level.
@@ -24,23 +25,35 @@ class StoragePool:
         self._block_size = devices[0].get_block_size()
         self._size = sum(d.get_size() for d in devices)
         
-        self._virtual_to_physical_block_map:dict[int, tuple[VirtualDevice, int]] = {} # maps virtual block numbers to Real blocks on a device
-        self._physical_to_virtual_block_map:dict[tuple[VirtualDevice, int], int] = {} # maps real blocks to virtual block numbers
+        self._mapping:PhysicalVirtualBlockMapping = PhysicalVirtualBlockMapping()
         
-        self._physical_blocks_used:dict[VirtualDevice, dict[int, list[BlockUser]]] = {} # device -> (physical block -> users)
+        self._snapshots:list[Snapshot] = []
             
         self.logger = logger if logger is not None else logging.getLogger(__name__)
         
         self._new_block_number = [0 for _ in range(len(devices))] # where to allocate the next block for each device
         self._device_blocks_used:dict[VirtualDevice, int] = {d:0 for d in devices} # how many blocks are in use on each device, used for CoW
         
-    def _add_virtual_block_link(self, virtual_block:int, device:VirtualDevice, physical_block:int):
-        self._virtual_to_physical_block_map[virtual_block] = (device, physical_block)
-        self._physical_to_virtual_block_map[(device, physical_block)] = virtual_block
-        
-    def _remove_virtual_block_link(self, virtual_block:int):
-        device, physical_block = self._virtual_to_physical_block_map.pop(virtual_block)
-        self._physical_to_virtual_block_map.pop((device, physical_block))
+    def _get_physical_blocks_used(self, filter_device:Optional[VirtualDevice]=None) -> dict[VirtualDevice, set[int]]:
+        """Get the physical blocks used by each device, whether in snapshots or the active mapping
+
+        Args:
+            filter_device (Optional[VirtualDevice], optional): if set, filter to this device only. Defaults to None.
+
+        Returns:
+            dict[VirtualDevice, set[int]]: device -> {physical block numbers in use}
+        """           
+        physical_blocks_used:dict[VirtualDevice,set[int]] = {}
+        for mapping in [self._mapping] + [snapshot.get_mapping() for snapshot in self._snapshots]:
+            for device, blocks in mapping.get_physical_block_usage_sets().items():
+                if filter_device is not None and device != filter_device:
+                    continue
+                if not isinstance(device, VirtualDevice):
+                    raise SyntaxError("Device is not a virtual device, this should never happen and is here for type checking.")
+                if device not in physical_blocks_used:
+                    physical_blocks_used[device] = set()
+                physical_blocks_used[device].update(blocks)
+        return physical_blocks_used
         
     def _allocate_new_physical_block(self) -> tuple[VirtualDevice, int]:
         """allocate a physical block from the devices in the storage pool
@@ -53,7 +66,8 @@ class StoragePool:
         new_block_number = self._new_block_number[self._devices.index(device)]
         # increment until we find an unused one
         traversed_count = 0
-        while new_block_number in self._physical_blocks_used.get(device, {}):
+        physical_blocks_used = self._get_physical_blocks_used(device)
+        while new_block_number in physical_blocks_used.get(device, set()):
             new_block_number += 1
             traversed_count += 1
             if new_block_number >= device.get_size() // self._block_size:
@@ -74,8 +88,7 @@ class StoragePool:
             physical_block_number (int): the physical block number to free
         """        
         self._device_blocks_used[device] -= 1
-        self._physical_blocks_used[device].pop(physical_block_number)
-        self._remove_virtual_block_link(self._physical_to_virtual_block_map[(device, physical_block_number)])
+        self._mapping.unenroll_mapping_physical(device, physical_block_number)
         
     def read_physical_block(self, device:VirtualDevice, physical_block:int) -> bytes:
         """Read a block from a physical device
@@ -89,37 +102,38 @@ class StoragePool:
         """
         return device.read_block(physical_block)
         
-    def read_virtual_block(self, block_number:int) -> bytes:
+    def read_virtual_block(self, block_number:int, snapshot:Optional[None] = None) -> bytes:
         """Read a block from the storage pool.
 
         Args:
             block_number (int): the block number to read
+            snapshot (Optional[None], optional): If set, this snapshot will be used for the reading. Defaults to None.
             
         Raises:
             ValueError: if the block number is out of range
             ValueError: if the block is not in use
             
-
         Returns:
             bytes: the block data
         """
-        if block_number not in self._virtual_to_physical_block_map:
+        mapping = snapshot.get_mapping() if snapshot is not None else self._mapping
+        if not mapping.check_virtual_block(block_number):
             raise ValueError(f"Block {block_number} not in use.")
-        device, physical_block = self._virtual_to_physical_block_map[block_number]
+        device, physical_block = mapping.get_physical_block(block_number)
+        if not isinstance(device, VirtualDevice):
+            raise SyntaxError("Device is not a virtual device, this should never happen and is here for type checking.")
         return self.read_physical_block(device, physical_block)
     
-    def write_virtual_block(self, block_number:int, data:bytes, user: BlockUser) -> bool:
+    def write_virtual_block(self, block_number:int, data:bytes) -> bool:
         """Write a block to the storage pool, this will allocate a new block for copy-on-write functionality.
         
         Args:
             block_number (int): the block number to write
             data (bytes): the data to write
-            user (BlockUser): the user writing the block
             
         Raises:
             ValueError: if the block number is out of range
             ValueError: if the data length is not the same as the block size
-            ValueError: if the user does not have ownership of the block
             
         Returns:
             bool: True if the write was successful, False otherwise
@@ -129,49 +143,71 @@ class StoragePool:
         if len(data) != self._block_size:
             raise ValueError(f"Tried to write {len(data)} bytes to a block of size {self._block_size}.")
         
-        if block_number in self._virtual_to_physical_block_map:
-            device, physical_block = self._virtual_to_physical_block_map[block_number]
-            # check if the block is in use
-            if user not in self._physical_blocks_used[device][physical_block]:
-                raise ValueError(f"{self.name} Unallowed access: User {user} does not use block {block_number}")
-            # remove the user from the block
-            self._physical_blocks_used[device][physical_block].remove(user)
-            # check if the block is in use by anyone else
-            if len(self._physical_blocks_used[device][physical_block]) == 0:
-                self._free_physical_block(device, physical_block)
-        # allocate a new block
+        # Write to a new block
         new_device, new_physical_block = self._allocate_new_physical_block()
         success = new_device.write_block(new_physical_block, data)
         if not success:
             return False
-        self._add_virtual_block_link(block_number, new_device, new_physical_block)
-        if new_device not in self._physical_blocks_used:
-            self._physical_blocks_used[new_device] = {}
-        self._physical_blocks_used[new_device][new_physical_block] = [user]
+        if not self._mapping.check_virtual_block(block_number): # if its a fresh block, no need to update mapping
+            self._mapping.enroll_mapping(new_device, new_physical_block, block_number)
+            return True
+        
+        # this block was in use, check if we need to remove the old block
+        old_device, old_block = self._mapping.update_mapping(block_number, new_device, new_physical_block)
+        if not isinstance(old_device, VirtualDevice):
+            raise SyntaxError("Device is not a virtual device, this should never happen and is here for type checking.")
+        # remove user from old block
+        if old_block not in self._get_physical_blocks_used(old_device)[old_device]:
+            self._free_physical_block(old_device, old_block)
         return True
-    
-    def release_ownership(self, block_number:int, user:BlockUser):
-        """Release ownership of a block
-
-        Args:
-            block_number (int): the block number to release
-            user (BlockUser): the user releasing the block
-        """        
-        if block_number not in self._virtual_to_physical_block_map:
-            raise ValueError(f"Block {block_number} not in use.")
-        device, physical_block = self._virtual_to_physical_block_map[block_number]
-        if user not in self._physical_blocks_used[device][physical_block]:
-            raise ValueError(f"User {user} does not own block {block_number}.")
-        self._physical_blocks_used[device][physical_block].remove(user)
-        if len(self._physical_blocks_used[device][physical_block]) == 0:
-            self._free_physical_block(device, physical_block)
             
     def get_fullness(self) -> float:
         """Get the fullness of the storage pool
 
         Returns:
-            float: the fullness as a percentage
+            float: the fullness between 0 and 1
         """        
         total_blocks = self._size // self._block_size
-        used_space = sum(len(blocks) for blocks in self._physical_blocks_used.values())
+        used_space = sum(len(blocks) for blocks in self._get_physical_blocks_used().values())
         return used_space / total_blocks
+    
+    def get_free_block_count(self) -> int:
+        """Get the number of free blocks in the storage pool
+
+        Returns:
+            int: number of blocks available
+        """
+        total_blocks = self._size // self._block_size
+        used_space = sum(len(blocks) for blocks in self._get_physical_blocks_used().values())
+        return total_blocks - used_space
+    
+    def get_usage_stats(self) -> tuple[int,int,int]:
+        """Get the usage statistics for the storage pool
+
+        Returns:
+            tuple[int,int,int]: actively used blocks, snapshot used blocks, free blocks
+        """
+        total_blocks = self._size // self._block_size
+        current_blocks = self._mapping.get_virtual_block_usage_set()
+        snapshot_blocks:set[int] = set()
+        for snapshot in self._snapshots:
+            snapshot_blocks.update(snapshot.get_mapping().get_virtual_block_usage_set())
+        exclusive_snapshot_blocks = snapshot_blocks - current_blocks
+        return len(current_blocks), len(exclusive_snapshot_blocks), total_blocks - len(current_blocks) - len(exclusive_snapshot_blocks)
+    
+    def capture_snapshot(self) -> Snapshot:
+        """Capture a snapshot of the storage pool"""
+        snapshot = Snapshot(self._mapping)
+        self._snapshots.append(snapshot)
+        return snapshot
+    
+    def get_snapshots(self) -> list[Snapshot]:
+        """Get a list of snapshots
+
+        Returns:
+            list[Snapshot]: list of snapshots
+        """
+        return self._snapshots
+    
+    
+        

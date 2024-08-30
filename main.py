@@ -1,5 +1,4 @@
 import logging
-from typing import Optional
 
 
 from library.Device.PhysicalDevice import PhysicalDevice
@@ -79,9 +78,32 @@ def test2():
         sp.write_virtual_block(i, string_to_write)
         pretty_print_usage_stats(sp)
         
-    # sp.read_virtual_block(5)
-    # sp.release_ownership(5, b)
-    # print(sp.get_fullness())
+    for i in range(20):
+        expected_string = f"Hellohel{i+1:02d}".encode()
+        assert sp.read_virtual_block(i) == expected_string
+    print("All reads successful")
+    
+    snap = sp.capture_snapshot()
+    print("Snapshot taken")
+    
+    for i in range(10):
+        sp.free_virtual_block(i)
+    print("Freed first 10 blocks, but snapshot still has them")
+    pretty_print_usage_stats(sp)
+    
+    print("Attempting to write to snapshot...",end=" ")
+    try:
+        sp.write_virtual_block(0, b"Hellohello") # this currently steals snapshot blocks, bad
+    except ValueError as e:
+        assert str(e) == "All blocks in use."
+        print("Caught expected error")
+    else:
+        print("Error not caught")
+        raise Exception("Should have failed")
+    
+    pretty_print_usage_stats(sp)
+    
+    
     # sp.write_virtual_block(5, b"Helloworld", b)
     # print(sp.get_fullness())
     

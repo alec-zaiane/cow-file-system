@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from library.Device.Device import Device
 
 class PhysicalVirtualBlockMapping:
@@ -146,5 +148,12 @@ class PhysicalVirtualBlockMapping:
         for device, mapping in self._physical_to_virtual_map.items():
             output[device] = set(mapping.keys())
         return output
+    
+    def get_snapshot(self) -> PhysicalVirtualBlockMapping:
+        new_map = PhysicalVirtualBlockMapping()
+        for device in self._physical_to_virtual_map:
+            for physical_block, virtual_block in self._physical_to_virtual_map[device].items():
+                new_map.enroll_mapping(device, physical_block, virtual_block)
+        return new_map
     
     

@@ -15,7 +15,7 @@ testLogger.setLevel(logging.ERROR)
 def pretty_print_usage_stats(pool:StoragePool):
     active, snapshot, free = pool.get_usage_stats()
     total = active + snapshot + free
-    print(f"Usage stats: {active} block(s) active ({active/total*100:.2f}%), {snapshot} block(s) in snapshot ({snapshot/total*100:.2f}%), {free} block(s) free ({free/total*100:.2f}%)")
+    print(f"Usage stats: {active} block(s) active ({active/total*100:.2f}%), {snapshot} block(s) in snapshot(s) ({snapshot/total*100:.2f}%), {free} block(s) free ({free/total*100:.2f}%)")
 
 def test1():
     pd = PhysicalDevice("pd1", 100, 10)
@@ -103,6 +103,15 @@ def test2():
     
     pretty_print_usage_stats(sp)
     
+    sp.delete_snapshot(snap)
+    print("Snapshot deleted")
+    try:
+        sp.write_virtual_block(0, b"Hellohello")
+    except ValueError as e:
+        raise Exception("Should not have failed")
+    else:
+        print("Write successful")
+    pretty_print_usage_stats(sp)
     
     # sp.write_virtual_block(5, b"Helloworld", b)
     # print(sp.get_fullness())

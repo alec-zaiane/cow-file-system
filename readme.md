@@ -1,5 +1,5 @@
 # cow-file-system
-*"ZFS at home"*
+*"We have ZFS at home", the ZFS at home:*
 
 
 My own implementation of the logic behind a copy-on-write file system

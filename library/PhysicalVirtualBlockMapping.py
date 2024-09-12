@@ -74,7 +74,9 @@ class PhysicalVirtualBlockMapping:
         Args:
             device (PhysicalDevice): physical device to remove the mapping from
             physical_block (int): block on that device to remove the mapping from
-        """        
+        """
+        print("unenroll_mapping_physical", physical_block)
+        print("Current:", self._physical_to_virtual_map[device])
         self.unenroll_mapping(self.get_virtual_block(device, physical_block))
         
     def get_physical_block(self, virtual_block:int) -> tuple[Device, int]:

@@ -5,6 +5,7 @@ from library.Device.PhysicalDevice import PhysicalDevice
 from library.Device.VirtualDevice import *
 from library.StoragePool import StoragePool
 import library.Device.DeviceState as States
+from library.FileSystem import FileSystem
 
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -117,5 +118,69 @@ def test2():
     # print(sp.get_fullness())
     
     
-test2()
+def test3():
+    pd1 = PhysicalDevice("pd1",100, 10)
+    vd1 = VirtualDeviceFactory.create_virtual_device("vdev1", [pd1], "stripe", testLogger)
+    sp = StoragePool("sp1", [vd1], testLogger)
+    sp.write_virtual_block(9, b"HelloHello")
+    assert sp.read_virtual_block(9) == b"HelloHello"
+    sp.write_virtual_block(9, b"WorldWorld")
+    assert sp.read_virtual_block(9) == b"WorldWorld"
+    usage = sp.get_usage_stats()
+    assert usage == (1, 0, 9)
+    
+    snap = sp.capture_snapshot()
+    sp.free_virtual_block(9)
+    assert sp.read_virtual_block(9, snap) == b"WorldWorld"
+    assert sp.get_usage_stats() == (0, 1, 9)
+    print("Test 3 passed (snapshot read)")
+    
+test3()
+
+
+def debug_print_storage_pool(sp:StoragePool):
+    print(f"Storage pool {sp.name}:")
+    used_blocks = sp.get_virtual_blocks_used()
+    skipped_blocks:set[int] = set()
+    for i in range(max(used_blocks)+1):
+        closest_used = min(used_blocks, key=lambda x: abs(x-i))
+        if abs(closest_used-i) > 1:
+            skipped_blocks.add(i)
+            
+    for i in range(sp.get_num_blocks()):
+        if i in skipped_blocks:
+            if i-1 not in skipped_blocks:
+                print("...")
+            continue
+        print(f"Block {i}: ".ljust(11), end="| ")
+        if i not in used_blocks:
+            print("__ "*sp.get_block_size(), end="")
+            print(f"| {'_'*sp.get_block_size()} |")
+            continue
+        data = sp.read_virtual_block(i)
+        for byte in data:
+            print(f"{byte:02x}", end=" ")
+        print("|", end=" ")
+        for byte in data:
+            print(chr(byte) if byte > 31 and byte < 127 else ".", end="")
+        print(" |")
+    print()
+
+def test4():
+    pd1 = PhysicalDevice("pd1",2048, 16)
+    vd1 = VirtualDeviceFactory.create_virtual_device("vdev1", [pd1], "stripe", testLogger)
+    sp = StoragePool("sp1", [vd1], testLogger)
+    filesystem = FileSystem(sp)
+    
+    filesystem.write_file("file1", b"Hello World!")
+    assert filesystem.read_file("file1").decode() == "Hello World!"
+    filesystem.write_file("file2", b"Hello World again!")
+    assert filesystem.read_file("file2").decode() == "Hello World again!"
+    filesystem.write_file("file3", b"Hello World a third time!")
+    assert filesystem.read_file("file3").decode() == "Hello World a third time!"
+    print("Test 4 passed (filesystem read/write)")
+
+test4()
+    
+    
     

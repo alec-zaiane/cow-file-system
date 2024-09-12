@@ -13,3 +13,5 @@ PhysicalDevice -> VirtualDevice -> StoragePool -> StorageDataset -> FileSystem -
 For simplicity, all devices up to the StoragePool must have the same block size for now
 
 While physical redundancy is part of the structure of the project, time-based failures are not protected, for example crashes during the middle of a write.
+
+Commit-based writing is something else I would have liked to implement, but that would have ballooned the project complexity significantly

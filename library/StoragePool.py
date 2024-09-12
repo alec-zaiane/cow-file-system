@@ -89,6 +89,17 @@ class StoragePool:
         """
         self._mapping.unenroll_mapping_physical(device, physical_block_number)
         
+    def bytes2block_count(self, bytes:int) -> int:
+        """Given a number of bytes, return the number of blocks needed to store that many bytes
+
+        Args:
+            bytes (int): the number of bytes to convert
+
+        Returns:
+            int: the number of blocks needed to store that data
+        """
+        return (bytes + self._block_size - 1) // self._block_size        
+        
     def read_physical_block(self, device:VirtualDevice, physical_block:int) -> bytes:
         """Read a block from a physical device
 
@@ -101,7 +112,7 @@ class StoragePool:
         """
         return device.read_block(physical_block)
         
-    def read_virtual_block(self, block_number:int, snapshot:Optional[None] = None) -> bytes:
+    def read_virtual_block(self, block_number:int, snapshot:Optional[Snapshot] = None) -> bytes:
         """Read a block from the storage pool.
 
         Args:
@@ -122,6 +133,36 @@ class StoragePool:
         if not isinstance(device, VirtualDevice):
             raise SyntaxError("Device is not a virtual device, this should never happen and is here for type checking.")
         return self.read_physical_block(device, physical_block)
+    
+    def read_virtual_blocks(self, start_block:int, end_block:int, snapshot:Optional[None] = None) -> bytes:
+        """Read multiple blocks from the storage pool, starting at the given block number
+
+        Args:
+            start_block (int): block number to start reading at
+            end_block (int): block number to stop reading at (inclusive)
+            snapshot (Optional[None], optional): If set, this snapshot will be used for the reading. Defaults to None.
+
+        Returns:
+            bytes: the data read
+        """
+        data = b""
+        for i in range(start_block, end_block+1):
+            data += self.read_virtual_block(i, snapshot)
+        return data
+    
+    def read_virtual_blocks_byte_count(self, start_block:int, bytes_count:int, snapshot:Optional[None] = None) -> bytes:
+        """Read a number of bytes from the storage pool, starting at the given block number
+
+        Args:
+            start_block (int): block number to start reading at
+            bytes_count (int): number of bytes to read
+            snapshot (Optional[None], optional): If set, this snapshot will be used for the reading. Defaults to None.
+
+        Returns:
+            bytes: the data read
+        """
+        end_block = start_block + self.bytes2block_count(bytes_count)
+        return self.read_virtual_blocks(start_block, end_block, snapshot)[:bytes_count]        
     
     def write_virtual_block(self, block_number:int, data:bytes) -> bool:
         """Write a block to the storage pool, this will allocate a new block for copy-on-write functionality.
@@ -152,13 +193,41 @@ class StoragePool:
             return True
         
         # this block was in use, check if we need to remove the old block
-        old_device, old_block = self._mapping.update_mapping(block_number, new_device, new_physical_block)
-        if not isinstance(old_device, VirtualDevice):
-            raise SyntaxError("Device is not a virtual device, this should never happen and is here for type checking.")
-        # remove user from old block
-        if old_block not in self._get_physical_blocks_used(old_device)[old_device]:
-            self._free_physical_block(old_device, old_block)
+        self._mapping.update_mapping(block_number, new_device, new_physical_block)
+        # if not isinstance(old_device, VirtualDevice):
+        #     raise SyntaxError("Device is not a virtual device, this should never happen and is here for type checking.")
+        # # remove user from old block
+        # if old_block not in self._get_physical_blocks_used(old_device)[old_device]:
+        #     self._free_physical_block(old_device, old_block) # TODO this is the current source of the keyerror bug
         return True
+    
+    def write_virtual_blocks(self, start_block:int, data:bytes) -> bool:
+        """Write multiple blocks to the storage, starting at the given block number
+
+        Args:
+            start_block (int): block number to start writing at
+            data (bytes): data to write, will be padded with zeroes if not a multiple of the block size
+            
+        Raises:
+            ValueError: if the start block is out of range
+            ValueError: if the calculated end block is out of range
+            
+        Returns:
+            bool: True if all writes were successful, False otherwise
+        """
+        pad_length = self._block_size - (len(data) % self._block_size)
+        data += b"\x00" * pad_length
+        end_block = start_block + len(data) // self._block_size
+        if start_block < 0 or start_block > self._size // self._block_size:
+            raise ValueError(f"Start block number {start_block} out of range.")
+        if end_block < 0 or end_block > self._size // self._block_size:
+            raise ValueError(f"End block number {end_block} out of range.")
+        all_successful = True
+        for i, block_to_write in enumerate(range(start_block, end_block)):
+            data_fragment = data[i*self._block_size:(i+1)*self._block_size]
+            all_successful = all_successful and self.write_virtual_block(block_to_write, data_fragment)
+        return all_successful
+                
     
     def free_virtual_block(self, block_number:int):
         """Free a block from the current mapping
@@ -234,6 +303,26 @@ class StoragePool:
             snapshot (Snapshot): the snapshot to delete
         """
         self._snapshots.remove(snapshot)
+        
+    def get_num_blocks(self) -> int:
+        """
+        Returns:
+            int: The number of blocks in the pool
+        """       
+        return self._size // self._block_size 
     
+    def get_block_size(self) -> int: 
+        """
+        Returns:
+            int: The block size in bytes
+        """        
+        return self._block_size
+    
+    def get_virtual_blocks_used(self) -> set[int]:
+        """
+        Returns:
+            set[int]: The set of virtual blocks in use
+        """        
+        return self._mapping.get_virtual_block_usage_set()
     
         

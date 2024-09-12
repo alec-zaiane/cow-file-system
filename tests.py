@@ -179,7 +179,6 @@ def test4():
     filesystem.write_file("file3", b"Hello World a third time!")
     assert filesystem.read_file("file3").decode() == "Hello World a third time!"
     print("Test 4 passed (filesystem read/write)")
-
 test4()
     
     
